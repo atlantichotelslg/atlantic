@@ -1,0 +1,19 @@
+import type { Metadata } from 'next';
+import './globals.css';
+
+export const metadata: Metadata = {
+  title: 'Atlantic Hotel & Suites - Receipt System',
+  description: 'Receipt management system for Atlantic Hotel & Suites',
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}

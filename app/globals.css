@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50;
+  }
+}
+
+@layer utilities {
+  .print-only {
+    display: none;
+  }
+  
+  @media print {
+    .no-print {
+      display: none !important;
+    }
+    
+    .print-only {
+      display: block !important;
+    }
+    
+    @page {
+      size: A4 portrait;
+      margin: 10mm;
+    }
+    
+    body {
+      margin: 0;
+      padding: 0;
+      background: white;
+    }
+    
+    /* Ensure receipt fits on one page */
+    .receipt-container {
+      page-break-after: avoid;
+      page-break-inside: avoid;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+  }
+}

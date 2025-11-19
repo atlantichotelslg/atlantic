@@ -5,6 +5,7 @@ const nextConfig = {
     unoptimized: process.env.BUILD_MODE === 'electron' ? true : false,
   },
   ...(process.env.BUILD_MODE === 'electron' && {
+    assetPrefix: './',
     trailingSlash: true,
   })
 };

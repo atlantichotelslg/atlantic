@@ -1,6 +1,26 @@
 // lib/receipts.ts - DEBUG VERSION
 import { supabase, isOnline } from './supabase';
 
+// Tax Configuration
+export const TAX_CONFIG = {
+  VAT_RATE: 0.075,                    // 7.5%
+  CONSUMPTION_TAX_RATE: 0.05,         // 5%
+  VAT_NUMBER: 'VIVI4002500868',
+  TOTAL_TAX_RATE: 0.125,              // 7.5% + 5% = 12.5%
+};
+
+export const calculateTaxes = (subtotal: number) => {
+  const vatAmount = subtotal * TAX_CONFIG.VAT_RATE;
+  const consumptionTaxAmount = subtotal * TAX_CONFIG.CONSUMPTION_TAX_RATE;
+  const totalWithTax = subtotal + vatAmount + consumptionTaxAmount;
+  
+  return {
+    vatAmount: Math.round(vatAmount * 100) / 100,
+    consumptionTaxAmount: Math.round(consumptionTaxAmount * 100) / 100,
+    totalWithTax: Math.round(totalWithTax * 100) / 100,
+  };
+};
+
 export interface Receipt {
   id: string;
   serialNumber: string;
@@ -8,13 +28,31 @@ export interface Receipt {
   roomNumber: string;
   amountFigures: number;
   amountWords: string;
-  paymentMode: 'Cash' | 'Card' | 'Transfer';
+  paymentMode: 'Cash' | 'Card' | 'Transfer' | 'BTC';
+  companyName?: string; 
   receptionistName: string;
   location: string;
   receptionistSignature?: string;
   date: string;
   timestamp: number;
-  synced?: boolean;
+  synced: boolean;
+  
+  // NEW FIELDS
+  numberOfDays?: number;         // How many days paid for
+  dailyRate?: number;            // Price per day
+  roomDetails?: Array<{  // ← ADD THIS
+    roomNumber: string;
+    numberOfDays: number;
+    dailyRate: number;
+    subtotal: number;
+  }>;
+  isExtension?: boolean;         
+  originalReceiptId?: string;   
+  paymentForDates?: string;   
+  includeTax?: boolean;              // ← ADD THIS
+  vatAmount?: number;                // ← ADD THIS (7.5%)
+  consumptionTaxAmount?: number;     // ← ADD THIS (5%)
+  totalWithTax?: number;             // ← ADD THIS (subtotal + taxes)
 }
 
 export class ReceiptService {
@@ -132,10 +170,21 @@ export class ReceiptService {
         amount_figures: receipt.amountFigures,
         amount_words: receipt.amountWords,
         payment_mode: receipt.paymentMode,
+        company_name: receipt.companyName || null,  // ← ADD THIS
         receptionist_name: receipt.receptionistName,
         location: receipt.location,
         date: receipt.date,
         timestamp: receipt.timestamp,
+        number_of_days: receipt.numberOfDays || null,  // ← ADD THIS
+        daily_rate: receipt.dailyRate || null,  // ← ADD THIS
+        room_details: receipt.roomDetails || null,  // ← ADD THIS
+        is_extension: receipt.isExtension || false,  // ← ADD THIS
+        original_receipt_id: receipt.originalReceiptId || null,  // ← ADD THIS
+        payment_for_dates: receipt.paymentForDates || null,  // ← ADD THIS
+        include_tax: receipt.includeTax || false,  // ← ADD THIS
+        vat_amount: receipt.vatAmount || null,  // ← ADD THIS
+        consumption_tax_amount: receipt.consumptionTaxAmount || null,  // ← ADD THIS
+        total_with_tax: receipt.totalWithTax || null,  // ← ADD THIS
       };
       
       console.log('📤 Sending data:', dataToInsert);
@@ -281,11 +330,18 @@ export class ReceiptService {
         amountFigures: parseFloat(item.amount_figures),
         amountWords: item.amount_words,
         paymentMode: item.payment_mode,
+        companyName: item.company_name || undefined,  // ← ADD THIS
         receptionistName: item.receptionist_name,
         location: item.location || 'Unknown',
         date: item.date,
         timestamp: item.timestamp,
         synced: true,
+        numberOfDays: item.number_of_days || undefined,  // ← ADD THIS
+        dailyRate: item.daily_rate || undefined,  // ← ADD THIS
+        roomDetails: item.room_details || undefined,  // ← ADD THIS
+        isExtension: item.is_extension || false,  // ← ADD THIS
+        originalReceiptId: item.original_receipt_id || undefined,  // ← ADD THIS
+        paymentForDates: item.payment_for_dates || undefined,  // ← ADD THIS
       }));
     } catch (error) {
       console.error('❌ Cloud fetch exception:', error);

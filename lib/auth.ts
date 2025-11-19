@@ -1,14 +1,17 @@
 // lib/auth.ts
+export type UserRole = 'Admin' | 'Receptionist' | 'Restaurant';
+
 export interface User {
   username: string;
   name: string;
-  role: string;
+  role: UserRole;
 }
 
 // Default users (stored locally for offline access)
-const DEFAULT_USERS = [
+const DEFAULT_USERS: Array<{ username: string; password: string; name: string; role: UserRole }> = [
   { username: 'admin', password: 'admin123', name: 'Administrator', role: 'Admin' },
   { username: 'receptionist', password: 'recept123', name: 'Front Desk', role: 'Receptionist' },
+  { username: 'atlantic', password: 'atlantic', name: 'Restaurant Staff', role: 'Restaurant' },
 ];
 
 export class AuthService {
@@ -20,8 +23,31 @@ export class AuthService {
     if (typeof window === 'undefined') return;
     
     const stored = localStorage.getItem(this.STORAGE_KEY);
+    
+    // If no stored users, initialize with all defaults
     if (!stored) {
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(DEFAULT_USERS));
+      console.log('✅ Initialized users:', DEFAULT_USERS.map(u => u.username));
+      return;
+    }
+    
+    // Parse existing users
+    const users = JSON.parse(stored);
+    let updated = false;
+    
+    // Check each default user and add if missing
+    DEFAULT_USERS.forEach(defaultUser => {
+      const exists = users.some((u: any) => u.username === defaultUser.username);
+      if (!exists) {
+        users.push(defaultUser);
+        updated = true;
+        console.log(`✅ Added missing user: ${defaultUser.username} (${defaultUser.role})`);
+      }
+    });
+    
+    // Save if any users were added
+    if (updated) {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(users));
     }
   }
 

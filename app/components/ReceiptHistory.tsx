@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { ReceiptService, Receipt } from '@/lib/receipts';
 import { getLocationAddress } from '@/lib/locations';
+import { Room } from '@/lib/rooms';  // ← ADD THIS
+import RoomInvoiceGenerator from './RoomInvoiceGenerator';  // ← ADD THIS
 
 interface ReceiptHistoryProps {
   userLocation: string;
@@ -16,6 +18,9 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
   const [loading, setLoading] = useState(true);
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const receiptRef = useRef<HTMLDivElement>(null);
+  const [viewMode, setViewMode] = useState<'receipts' | 'invoices'>('receipts');
+  const [guestInvoices, setGuestInvoices] = useState<{[key: string]: Receipt[]}>({});
+  const [selectedGuestForInvoice, setSelectedGuestForInvoice] = useState<{name: string, room: string, receipts: Receipt[]} | null>(null);
 
   useEffect(() => {
     loadReceipts();
@@ -51,6 +56,36 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
     setFilteredReceipts(filtered);
   };
 
+  const groupReceiptsByGuest = () => {
+    const grouped: {[key: string]: Receipt[]} = {};
+    
+    receipts.forEach(receipt => {
+      // Handle both single rooms and multi-room bookings
+      const rooms = receipt.roomNumber.split(',').map(r => r.trim());
+      
+      // For multi-room bookings, create entries for EACH individual room
+      rooms.forEach(room => {
+        const key = `${receipt.customerName.toLowerCase().trim()}_${room}`;
+        
+        if (!grouped[key]) {
+          grouped[key] = [];
+        }
+        
+        // Check if this receipt is already in the array (avoid duplicates)
+        if (!grouped[key].some(r => r.id === receipt.id)) {
+          grouped[key].push(receipt);
+        }
+      });
+    });
+    
+    console.log('📊 Grouped invoices by individual rooms:', grouped);
+    setGuestInvoices(grouped);
+  };
+
+  useEffect(() => {
+    groupReceiptsByGuest();
+  }, [receipts]);
+
   const handleViewReceipt = (receipt: Receipt) => {
     setSelectedReceipt(receipt);
   };
@@ -62,6 +97,52 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
   const handleCloseReceipt = () => {
     setSelectedReceipt(null);
   };
+
+  const handleViewInvoice = (customerName: string, roomNumber: string, receipts: Receipt[]) => {
+    console.log('🏨 Opening invoice with receipts:', receipts);
+    setSelectedGuestForInvoice({ 
+      name: customerName, 
+      room: roomNumber,
+      receipts: receipts 
+    });
+  };
+
+// Show full invoice for selected guest
+  if (selectedGuestForInvoice) {
+    const guestReceipts = selectedGuestForInvoice.receipts;
+    
+    console.log('📄 Rendering invoice with receipts:', guestReceipts);
+    
+    if (!guestReceipts || guestReceipts.length === 0) {
+      return (
+        <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-8">
+          <p className="text-red-600">No receipts found for this guest.</p>
+          <button
+            onClick={() => setSelectedGuestForInvoice(null)}
+            className="mt-4 px-6 py-3 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition"
+          >
+            ← Back to Invoices
+          </button>
+        </div>
+      );
+    }
+
+    // Create a mock Room object for the invoice generator
+    const mockRoom: Room = {
+      id: `${userLocation}_${selectedGuestForInvoice.room}`,
+      number: selectedGuestForInvoice.room,
+      status: 'occupied',
+      location: userLocation,
+      guestName: selectedGuestForInvoice.name,
+      checkIn: guestReceipts[0].date,
+      checkOut: '',
+      isManagerRoom: false,
+      floor: 1,  
+      lastUpdated: Date.now(),  
+    };
+
+    return <RoomInvoiceGenerator room={mockRoom} location={userLocation} onClose={() => setSelectedGuestForInvoice(null)} />;
+  }
 
   if (selectedReceipt) {
     // Show full receipt for printing
@@ -83,99 +164,244 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
           </button>
         </div>
 
-        {/* A4 Receipt */}
+        {/* Receipt - Same format as home page */}
         <div 
           ref={receiptRef}
-          className="bg-white"
-          style={{
-            width: '100%',
-            padding: '10mm',
-          }}
+          className="bg-white print-only"
+          style={{ 
+            width: '800px',
+            margin: '0 auto',
+            padding: '0',
+            marginLeft: '-100px',
+            marginTop: '-30px'
+          }}  
         >
-          {/* Header */}
-          <div className="flex justify-between items-start mb-8 border-b-2 border-gray-300 pb-6">
-            {/* Logo and Hotel Info */}
-            <div className="flex items-start gap-4">
-              <img 
-                src="/logo2.png" 
-                alt="Atlantic Hotel Logo" 
-                className="w-20 h-20 object-contain rounded"
-              />
-              <div>
-                <h1 className="text-xl font-bold text-gray-800">Atlantic Hotel & Suites</h1>
-                <p className="text-sm text-gray-600 mt-1">{getLocationAddress(selectedReceipt.location)}</p>
-                <p className="text-sm text-gray-600">Victoria Island, Lagos, Nigeria</p>
-                <p className="text-sm text-gray-600">info@atlanticslagos.com</p>
+          {/* Customer Copy */}
+          <div style={{ 
+            padding: '3mm 10mm', 
+            borderBottom: '2px dashed #999',
+            boxSizing: 'border-box'
+          }}>                   
+            <div className="text-right mb-2">
+              <span className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded">CUSTOMER COPY</span>
+            </div>
+            
+            {/* Header */}
+            <div className="flex justify-between items-start mb-4 border-b-2 border-gray-300 pb-3">
+              <div className="flex items-start gap-4">
+                <img 
+                  src="/logo2.png" 
+                  alt="Atlantic Hotel Logo" 
+                  className="w-20 h-20 object-contain rounded"
+                />
+                <div>
+                  <h1 className="text-lg font-bold text-gray-800">Atlantic Hotel & Suites</h1>
+                  <p className="text-sm text-gray-600 mt-1">{getLocationAddress(selectedReceipt.location)}</p>
+                  <p className="text-sm text-gray-600">Victoria Island, Lagos, Nigeria</p>
+                  <p className="text-sm text-gray-600">info@atlantichotelslagos.com</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-600 font-medium">Receipt No.</p>
+                <p className="text-lg font-bold text-blue-900">{selectedReceipt.serialNumber}</p>
+                <p className="text-sm text-gray-600 mt-2">{selectedReceipt.date}</p>
+                <p className="text-sm font-bold text-gray-600">Payment Receipt</p>
               </div>
             </div>
-            {/* Serial Number */}
-            <div className="text-right">
-              <p className="text-sm text-gray-600 font-medium">Receipt No.</p>
-              <p className="text-xl font-bold text-blue-900">{selectedReceipt.serialNumber}</p>
-              <p className="text-sm text-gray-600 mt-2">{selectedReceipt.date}</p>
-            </div>
-          </div>
 
-          {/* Receipt Title */}
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-gray-800 uppercase tracking-wide">
-              Payment Receipt
-            </h2>
-          </div>
-
-          {/* Receipt Body */}
-          <div className="space-y-6 mb-4">
-            <div className="border-b border-gray-300 pb-2">
-              <p className="text-xs text-gray-600 font-medium mb-1">Customer Name</p>
-              <p className="text-xl font-semibold text-gray-800">{selectedReceipt.customerName}</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
+            {/* Receipt Body */}
+            <div className="space-y-3 mb-4">
               <div className="border-b border-gray-300 pb-2">
-                <p className="text-xs text-gray-600 font-medium mb-1">Room Number</p>
-                <p className="text-xl font-semibold text-gray-800">{selectedReceipt.roomNumber}</p>
+                <p className="text-xs text-gray-600 font-medium mb-1">Customer Name</p>
+                <p className="text-lg font-semibold text-gray-800">{selectedReceipt.customerName}</p>
               </div>
-              <div className="border-b border-gray-300 pb-2">
-                <p className="text-xs text-gray-600 font-medium mb-1">Payment Mode</p>
-                <p className="text-xl font-semibold text-gray-800">{selectedReceipt.paymentMode}</p>
-              </div>
-            </div>
 
-            <div className="border-b border-gray-300 pb-2">
-              <p className="text-xs text-gray-600 font-medium mb-1">Amount Received (in words)</p>
-              <p className="text-sm font-semibold text-gray-800 uppercase">{selectedReceipt.amountWords}</p>
-            </div>
-
-            <div className="border-b border-gray-300 pb-2">
-              <p className="text-xs text-gray-600 font-medium mb-1">Amount Received (in figures)</p>
-              <p className="text-3xl font-bold text-blue-900">
-                ₦{selectedReceipt.amountFigures.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-            </div>
-          </div>
-
-          {/* Signature Section */}
-          <div className="pt-8 border-t-2 border-gray-300">
-            <div className="flex justify-between items-end">
-              <div className="w-64">
-                <p className="text-sm text-gray-600 font-medium mb-1">Receptionist</p>
-                <p className="text-lg font-semibold text-gray-800 mb-4">{selectedReceipt.receptionistName}</p>
-                <div className="border-t-2 border-gray-400 pt-1">
-                  <p className="text-xs text-gray-500">Signature</p>
+              {/* Room Numbers, Days, Payment Mode - All Horizontal */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="border-b border-gray-300 pb-2">
+                  <p className="text-xs text-gray-600 font-medium mb-1">Room Numbers</p>
+                  <p className="text-lg font-semibold text-gray-800">{selectedReceipt.roomNumber}</p>
+                </div>
+                <div className="border-b border-gray-300 pb-2">
+                  <p className="text-xs text-gray-600 font-medium mb-1">Number of Days</p>
+                  <p className="text-lg font-semibold text-gray-800">
+                    {selectedReceipt.numberOfDays || 1} day{(selectedReceipt.numberOfDays || 1) > 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div className="border-b border-gray-300 pb-2">
+                  <p className="text-xs text-gray-600 font-medium mb-1">Payment Mode</p>
+                  <p className="text-lg font-semibold text-gray-800">
+                    {selectedReceipt.paymentMode}
+                    {selectedReceipt.companyName && (
+                      <span className="text-sm text-gray-600 block mt-1">({selectedReceipt.companyName})</span>
+                    )}
+                  </p>
                 </div>
               </div>
 
-              <div className="text-right text-sm text-gray-500">
-                <p>Thank you for your patronage</p>
-                <p className="font-medium">Atlantic Hotel & Suites</p>
+              {/* Booking Period & Amount in Figures - Horizontal */}
+              <div className="grid grid-cols-2 gap-4">
+                {selectedReceipt.numberOfDays && (
+                  <div className="border-b border-gray-300 pb-2">
+                    <p className="text-xs text-gray-600 font-medium mb-1">Booking Period</p>
+                    <p className="text-sm font-semibold text-gray-800">
+                      {selectedReceipt.date}
+                      {selectedReceipt.dailyRate && (
+                        <span className="text-xs text-gray-600 block mt-1">
+                          (@ ₦{selectedReceipt.dailyRate.toLocaleString()}/day)
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )}
+
+                <div className="border-b border-gray-300 pb-2">
+                  <p className="text-xs text-gray-600 font-medium mb-1">Amount Received (in figures)</p>
+                  <p className="text-2xl font-bold text-blue-900">
+                    ₦{selectedReceipt.amountFigures.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-b border-gray-300 pb-2">
+                <p className="text-xs text-gray-600 font-medium mb-1">Amount Received (in words)</p>
+                <p className="text-sm font-semibold text-gray-800 uppercase">{selectedReceipt.amountWords}</p>
+              </div>
+            </div>
+
+            {/* Signature Section */}
+            <div className="pt-4 border-gray-300">
+              <div className="flex justify-between items-end">
+                <div className="w-64">
+                  <p className="text-sm text-gray-600 font-medium mb-1">Receptionist</p>
+                  <div className="border-t-2 border-gray-400 pt-1">
+                    <p className="text-xs text-gray-500">Signature</p>
+                  </div>
+                </div>
+
+                <div className="text-right text-sm text-gray-500">
+                  <p>Thank you for your patronage</p>
+                  <p className="font-medium">Atlantic Hotel & Suites</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="mt-4 text-center text-xs text-gray-500">
+              <p className="mt-1">For inquiries, please contact us at info@atlantichotelslagos.com</p>
+            </div>
+          </div>
+          {/* END Customer Copy */}
+
+          {/* Office Copy */}
+          <div style={{ 
+            padding: '3mm 10mm'
+          }}>
+            <div className="text-right mb-2">
+              <span className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded">OFFICE COPY</span>
+            </div>
+
+            {/* Header */}
+            <div className="flex justify-between items-start mb-4 border-b-2 border-gray-300 pb-3">
+              <div className="flex items-start gap-4">
+                <img 
+                  src="/logo2.png" 
+                  alt="Atlantic Hotel Logo" 
+                  className="w-20 h-20 object-contain rounded"
+                />
+                <div>
+                  <h1 className="text-lg font-bold text-gray-800">Atlantic Hotel & Suites</h1>
+                  <p className="text-sm text-gray-600 mt-1">{getLocationAddress(selectedReceipt.location)}</p>
+                  <p className="text-sm text-gray-600">Victoria Island, Lagos, Nigeria</p>
+                  <p className="text-sm text-gray-600">info@atlantichotelslagos.com</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-600 font-medium">Receipt No.</p>
+                <p className="text-lg font-bold text-blue-900">{selectedReceipt.serialNumber}</p>
+                <p className="text-sm text-gray-600 mt-2">{selectedReceipt.date}</p>
+                <p className="text-sm font-bold text-gray-600">Payment Receipt</p>
+              </div>
+            </div>
+
+            {/* Receipt Body */}
+            <div className="space-y-3 mb-4">
+              <div className="border-b border-gray-300 pb-2">
+                <p className="text-xs text-gray-600 font-medium mb-1">Customer Name</p>
+                <p className="text-lg font-semibold text-gray-800">{selectedReceipt.customerName}</p>
+              </div>
+
+              {/* Room Numbers, Days, Payment Mode - All Horizontal */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="border-b border-gray-300 pb-2">
+                  <p className="text-xs text-gray-600 font-medium mb-1">Room Numbers</p>
+                  <p className="text-lg font-semibold text-gray-800">{selectedReceipt.roomNumber}</p>
+                </div>
+                <div className="border-b border-gray-300 pb-2">
+                  <p className="text-xs text-gray-600 font-medium mb-1">Number of Days</p>
+                  <p className="text-lg font-semibold text-gray-800">
+                    {selectedReceipt.numberOfDays || 1} day{(selectedReceipt.numberOfDays || 1) > 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div className="border-b border-gray-300 pb-2">
+                  <p className="text-xs text-gray-600 font-medium mb-1">Payment Mode</p>
+                  <p className="text-lg font-semibold text-gray-800">
+                    {selectedReceipt.paymentMode}
+                    {selectedReceipt.companyName && (
+                      <span className="text-sm text-gray-600 block mt-1">({selectedReceipt.companyName})</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Booking Period & Amount in Figures - Horizontal */}
+              <div className="grid grid-cols-2 gap-4">
+                {selectedReceipt.numberOfDays && (
+                  <div className="border-b border-gray-300 pb-2">
+                    <p className="text-xs text-gray-600 font-medium mb-1">Booking Period</p>
+                    <p className="text-sm font-semibold text-gray-800">
+                      {selectedReceipt.date}
+                      {selectedReceipt.dailyRate && (
+                        <span className="text-xs text-gray-600 block mt-1">
+                          (@ ₦{selectedReceipt.dailyRate.toLocaleString()}/day)
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )}
+
+                <div className="border-b border-gray-300 pb-2">
+                  <p className="text-xs text-gray-600 font-medium mb-1">Amount Received (in figures)</p>
+                  <p className="text-2xl font-bold text-blue-900">
+                    ₦{selectedReceipt.amountFigures.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-b border-gray-300 pb-2">
+                <p className="text-xs text-gray-600 font-medium mb-1">Amount Received (in words)</p>
+                <p className="text-sm font-semibold text-gray-800 uppercase">{selectedReceipt.amountWords}</p>
+              </div>
+            </div>
+
+            {/* Signature Section */}
+            <div className="pt-2 border-gray-300">
+              <div className="flex justify-between items-end">
+                <div className="w-64">
+                  <p className="text-sm text-gray-600 font-medium mb-1">Receptionist</p>
+                  <div className="border-t-2 border-gray-400 pt-1">
+                    <p className="text-xs text-gray-500">Signature</p>
+                  </div>
+                </div>
+
+                <div className="text-right text-sm text-gray-500">
+                  <p>Thank you for your patronage</p>
+                  <p className="font-medium">Atlantic Hotel & Suites</p>
+                </div>
               </div>
             </div>
           </div>
-
-          {/* Footer */}
-          <div className="mt-4 text-center text-xs text-gray-500">
-            <p className="mt-1">For inquiries, please contact us at info@atlanticslagos.com</p>
-          </div>
+          {/* END Office Copy */}
         </div>
       </div>
     );
@@ -185,9 +411,38 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
   return (
     <div className="max-w-6xl mx-auto">
       <div className="bg-white rounded-xl shadow-lg p-8">
-        <h2 className="text-3xl font-bold text-gray-800 mb-2">Receipt History</h2>
+        {/* Tab Navigation */}
+        <div className="flex gap-4 mb-6 border-b border-gray-200">
+          <button
+            onClick={() => setViewMode('receipts')}
+            className={`pb-3 px-4 font-semibold transition ${
+              viewMode === 'receipts'
+                ? 'border-b-2 border-blue-600 text-blue-600'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            📄 Receipts ({filteredReceipts.length})
+          </button>
+          <button
+            onClick={() => setViewMode('invoices')}
+            className={`pb-3 px-4 font-semibold transition ${
+              viewMode === 'invoices'
+                ? 'border-b-2 border-blue-600 text-blue-600'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            🧾 Invoices ({Object.keys(guestInvoices).length})
+          </button>
+        </div>
+
+        <h2 className="text-3xl font-bold text-gray-800 mb-2">
+          {viewMode === 'receipts' ? 'Receipt History' : 'Invoice History'}
+        </h2>
         <p className="text-gray-600 mb-6">
-          Showing {filteredReceipts.length} receipts from {getLocationAddress(userLocation)}
+          {viewMode === 'receipts' 
+            ? `Showing ${filteredReceipts.length} receipts from ${getLocationAddress(userLocation)}`
+            : `Showing ${Object.keys(guestInvoices).length} guest invoices from ${getLocationAddress(userLocation)}`
+          }
         </p>
 
         {/* Search and Refresh */}
@@ -222,7 +477,7 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
             </svg>
             <p className="text-gray-600">No receipts found</p>
           </div>
-        ) : (
+        ) : viewMode === 'receipts' ? (
           <div className="space-y-4">
             {filteredReceipts.map((receipt) => (
               <div
@@ -268,7 +523,8 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
                     <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                       receipt.paymentMode === 'Cash' ? 'bg-green-100 text-green-700' :
                       receipt.paymentMode === 'Card' ? 'bg-blue-100 text-blue-700' :
-                      'bg-purple-100 text-purple-700'
+                      receipt.paymentMode === 'BTC' ? 'bg-purple-100 text-purple-700' :
+                      'bg-orange-100 text-orange-700'
                     }`}>
                       {receipt.paymentMode}
                     </span>
@@ -283,6 +539,93 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
                 </div>
               </div>
             ))}
+          </div>
+        ) : (
+          /* Invoice View */
+          <div className="space-y-4">
+            {Object.entries(guestInvoices).map(([key, guestReceipts]) => {
+              if (!guestReceipts || guestReceipts.length === 0) return null;  // ← ADD THIS
+              
+              const firstReceipt = guestReceipts[0];
+              const totalAmount = guestReceipts.reduce((sum, r) => sum + r.amountFigures, 0);
+              const totalDays = guestReceipts.reduce((sum, r) => sum + (r.numberOfDays || 1), 0);
+              
+              console.log(`📊 Invoice for ${firstReceipt.customerName}:`, {
+                key,
+                receipts: guestReceipts.length,
+                totalAmount,
+                totalDays
+              });
+              
+              return (
+                <div
+                  key={key}
+                  className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition"
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <p className="text-sm text-gray-600 mb-1">Guest Invoice</p>
+                      <p className="text-2xl font-bold text-blue-900">{firstReceipt.customerName}</p>
+                      <p className="text-sm text-gray-600 mt-1">Room {firstReceipt.roomNumber}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-gray-600">Check-in: {firstReceipt.date}</p>
+                      <p className="text-sm text-gray-600">Total Stay: {totalDays} day{totalDays > 1 ? 's' : ''}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 mb-4 bg-gray-50 p-4 rounded-lg">
+                    <div>
+                      <p className="text-sm text-gray-600">Receipts</p>
+                      <p className="text-xl font-bold text-gray-800">{guestReceipts.length}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">Total Days</p>
+                      <p className="text-xl font-bold text-gray-800">{totalDays}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-gray-600">Total Amount</p>
+                      <p className="text-xl font-bold text-green-600">
+                        ₦{totalAmount.toLocaleString('en-NG')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Receipt Breakdown */}
+                  <div className="mb-4">
+                    <p className="text-sm font-semibold text-gray-700 mb-2">Payment History:</p>
+                    <div className="space-y-2">
+                      {guestReceipts.map(receipt => (
+                        <div key={receipt.id} className="flex justify-between text-sm p-2 bg-gray-50 rounded">
+                          <span className="text-gray-600">
+                            {receipt.serialNumber} • {receipt.date}
+                          </span>
+                          <span className="font-semibold text-gray-800">
+                            ₦{receipt.amountFigures.toLocaleString('en-NG')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => {
+                        const roomNumber = firstReceipt.roomNumber.split(',')[0].trim();
+                        console.log('🏨 Opening invoice for:', firstReceipt.customerName, 'Room:', roomNumber, 'Receipts:', guestReceipts);
+                        handleViewInvoice(firstReceipt.customerName, roomNumber, guestReceipts);
+                      }}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium flex items-center gap-2"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      View Full Invoice
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -1,6 +1,12 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
-const isDev = process.env.NODE_ENV === 'development';
+const express = require('express');
+
+// Check if we're in development mode
+const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
+
+let server;
+const PORT = 3456;
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -9,20 +15,26 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
     },
     autoHideMenuBar: true,
     icon: path.join(__dirname, '../public/logo.png')
   });
 
-  const url = isDev
-    ? 'http://localhost:3000'
-    : `file://${path.join(__dirname, '../out/index.html')}`;
-
-  mainWindow.loadURL(url);
-
-  // Open DevTools in development
   if (isDev) {
+    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.webContents.openDevTools();
+  } else {
+    // Create local server to serve static files
+    const expressApp = express();
+    expressApp.use(express.static(path.join(__dirname, '../out')));
+    
+    server = expressApp.listen(PORT, () => {
+      console.log(`Local server running on http://localhost:${PORT}`);
+      mainWindow.loadURL(`http://localhost:${PORT}`);
+    });
+
+    // Open DevTools temporarily
     mainWindow.webContents.openDevTools();
   }
 }
@@ -30,6 +42,9 @@ function createWindow() {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
+  if (server) {
+    server.close();
+  }
   if (process.platform !== 'darwin') {
     app.quit();
   }

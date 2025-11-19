@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { RoomService, Room, RoomStatus } from '@/lib/rooms';
 import { getLocationAddress } from '@/lib/locations';
+import RoomInvoiceGenerator from './RoomInvoiceGenerator';
 
 interface RoomDashboardProps {
   userLocation: string;
@@ -15,6 +16,7 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [stats, setStats] = useState({ total: 0, available: 0, occupied: 0, maintenance: 0, unsynced: 0 });
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
 
@@ -51,10 +53,74 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
     loadRooms();
   };
 
-  const loadRooms = () => {
-    const locationRooms = RoomService.getRoomsByLocation(userLocation);
-    setRooms(locationRooms);
-    setStats(RoomService.getRoomStats(userLocation));
+  const loadRooms = async () => {
+    // Try to load from cloud first
+    try {
+      const cloudRooms = await RoomService.fetchRoomsFromCloud(userLocation);
+      
+      // Sort rooms numerically by room number
+      const sortedRooms = cloudRooms.sort((a, b) => {
+        const numA = parseInt(a.number);
+        const numB = parseInt(b.number);
+        return numA - numB;
+      });
+      
+      setRooms(sortedRooms);
+      setStats(RoomService.getRoomStats(userLocation));
+    } catch (error) {
+      // Fallback to localStorage
+      const locationRooms = RoomService.getRoomsByLocation(userLocation);
+      
+      // Sort rooms numerically
+      const sortedRooms = locationRooms.sort((a, b) => {
+        const numA = parseInt(a.number);
+        const numB = parseInt(b.number);
+        return numA - numB;
+      });
+      
+      setRooms(sortedRooms);
+      setStats(RoomService.getRoomStats(userLocation));
+    }
+  };
+
+  const handlePrintInvoice = () => {
+    if (!selectedRoom) return;
+    setShowUpdateModal(false);
+    setShowInvoiceModal(true);
+  };
+
+  const handleCheckOut = async () => {
+    if (!selectedRoom) return;
+    
+    // Confirm checkout
+    const confirmCheckout = confirm(
+      `Check out ${selectedRoom.guestName} from Room ${selectedRoom.number}?\n\nThis will:\n✓ Generate invoice\n✓ Mark room as available`
+    );
+    
+    if (!confirmCheckout) return;
+
+    // Show invoice first
+    setShowUpdateModal(false);
+    setShowInvoiceModal(true);
+    
+    // After invoice is closed, mark room as available
+    // This will be handled by the invoice component's onClose
+  };
+
+  const handleInvoiceClose = async () => {
+    setShowInvoiceModal(false);
+    
+    // Mark room as available after invoice
+    if (selectedRoom) {
+      await RoomService.updateRoomStatus(
+        userLocation,
+        selectedRoom.number,
+        'available'
+      );
+      
+      loadRooms();
+      setSelectedRoom(null);
+    }
   };
 
   const syncPendingRooms = async () => {
@@ -75,6 +141,12 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
     if (status === 'occupied') {
       setShowUpdateModal(false);
       onCreateReceipt(selectedRoom.number);
+      return;
+    }
+
+    if (status === 'available' && selectedRoom.status === 'occupied') {
+      // If checking out an occupied room, show invoice first
+      handleCheckOut();
       return;
     }
 
@@ -357,9 +429,6 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
                 {selectedRoom.linkedRoom && (
                   <p className="text-sm text-gray-600">Combined Room</p>
                 )}
-                {selectedRoom.guestName && (
-                  <p className="text-sm text-gray-600 mt-2">Guest: {selectedRoom.guestName}</p>
-                )}
               </div>
               <button
                 onClick={() => setShowUpdateModal(false)}
@@ -370,6 +439,21 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
                 </svg>
               </button>
             </div>
+
+            {/* Guest Information */}
+            {selectedRoom.status === 'occupied' && selectedRoom.guestName && (
+              <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm font-semibold text-blue-900 mb-2">Guest Information</p>
+                <p className="text-sm text-blue-800">
+                  <strong>Name:</strong> {selectedRoom.guestName}
+                </p>
+                {selectedRoom.checkIn && (
+                  <p className="text-sm text-blue-800">
+                    <strong>Check-in:</strong> {selectedRoom.checkIn}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="mb-6">
               <p className="text-sm text-gray-600 mb-2">Current Status:</p>
@@ -388,20 +472,52 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm font-semibold text-gray-700">Update Room Status:</p>
+              <p className="text-sm font-semibold text-gray-700">Actions:</p>
               
-              {selectedRoom.status !== 'available' && !selectedRoom.isManagerRoom && (
+              {/* Print Invoice Button for Occupied Rooms */}
+              {selectedRoom.status === 'occupied' && (
                 <button
-                  onClick={() => handleUpdateRoomStatus('available')}
+                  onClick={handlePrintInvoice}
                   className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition flex items-center justify-center gap-2"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  Mark as Available
+                  🧾 Print Invoice
                 </button>
               )}
 
+              {/* ADD THIS NEW BUTTON - Extend Stay */}
+              {selectedRoom.status === 'occupied' && !selectedRoom.isManagerRoom && (
+                <button
+                  onClick={() => {
+                    setShowUpdateModal(false);
+                    onCreateReceipt(selectedRoom.number); // This will open receipt form
+                    // TODO: Pass extension flag when you update the receipt form
+                  }}
+                  className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  💰 Extend Stay / Add Payment
+                </button>
+              )}
+
+              {/* Check Out Guest Button */}
+              {selectedRoom.status === 'occupied' && !selectedRoom.isManagerRoom && (
+                <button
+                  onClick={handleCheckOut}
+                  className="w-full bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700 transition flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                  ✅ Check Out Guest (Print Invoice)
+                </button>
+              )}
+
+              {/* Check-in Guest Button */}
               {selectedRoom.status !== 'occupied' && !selectedRoom.isManagerRoom && (
                 <button
                   onClick={() => handleUpdateRoomStatus('occupied')}
@@ -414,6 +530,7 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
                 </button>
               )}
 
+              {/* Maintenance Button */}
               {selectedRoom.status !== 'maintenance' && !selectedRoom.isManagerRoom && (
                 <button
                   onClick={() => handleUpdateRoomStatus('maintenance')}
@@ -422,7 +539,20 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01" />
                   </svg>
-                  Mark as Maintenance
+                  🔧 Set to Maintenance
+                </button>
+              )}
+
+              {/* ADD THIS - Remove from Maintenance Button */}
+              {selectedRoom.status === 'maintenance' && !selectedRoom.isManagerRoom && (
+                <button
+                  onClick={() => handleUpdateRoomStatus('available')}
+                  className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  ✅ Remove from Maintenance
                 </button>
               )}
 
@@ -441,6 +571,15 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
             </div>
           </div>
         </div>
+      )}
+
+      {/* Invoice Modal */}
+      {showInvoiceModal && selectedRoom && (
+        <RoomInvoiceGenerator
+          room={selectedRoom}
+          location={userLocation}
+          onClose={handleInvoiceClose}
+        />
       )}
     </div>
   );

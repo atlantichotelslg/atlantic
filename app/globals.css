@@ -10,35 +10,138 @@
 
 @layer utilities {
   .print-only {
-    display: none;
+    position: absolute;
+    left: -9999px;
+    top: 0;
   }
-  
+
   @media print {
     .no-print {
       display: none !important;
     }
     
     .print-only {
+      position: static !important;
+      left: auto !important;
       display: block !important;
     }
     
+    /* Default A4 page for invoices */
     @page {
       size: A4 portrait;
-      margin: 10mm;
+      margin: 0;
     }
     
     body {
-      margin: 0;
-      padding: 0;
-      background: white;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: white !important;
     }
     
-    /* Ensure receipt fits on one page */
-    .receipt-container {
-      page-break-after: avoid;
-      page-break-inside: avoid;
+    * {
+      box-sizing: border-box !important;
+    }
+    
+    /* Thermal Receipt Printer (80mm) - Continuous Print */
+    .thermal-receipt {
+      width: 72mm !important;
+      max-width: 72mm !important;
+      padding: 2mm 4mm !important;
+      margin: 0 auto !important;
+      font-family: 'Courier New', monospace !important;
+      font-size: 9pt !important;
+      line-height: 1.2 !important;
+      background: white !important;
+      page-break-inside: avoid !important;
+      page-break-after: avoid !important;
+      page-break-before: avoid !important;
+    }
+    
+    .thermal-receipt * {
+      visibility: visible !important;
+      page-break-inside: avoid !important;
+    }
+    
+    .thermal-receipt h1 {
+      font-size: 16pt !important;
+      text-align: center !important;
+      margin: 1mm 0 !important;
+      font-weight: bold !important;
+      page-break-after: avoid !important;
+    }
+    
+    .thermal-receipt h2 {
+      font-size: 14pt !important;
+      text-align: center !important;
+      margin: 1mm 0 !important;
+      page-break-after: avoid !important;
+    }
+    
+    .thermal-receipt p {
+      margin: 0.5mm 0 !important;
+      font-size: 9pt !important;
+      page-break-inside: avoid !important;
+    }
+    
+    .thermal-receipt table {
       width: 100% !important;
-      max-width: 100% !important;
+      font-size: 8pt !important;
+      border-collapse: collapse !important;
+      margin: 1mm 0 !important;
+      page-break-inside: avoid !important;
+    }
+    
+    .thermal-receipt thead {
+      page-break-after: avoid !important;
+    }
+    
+    .thermal-receipt tbody {
+      page-break-inside: avoid !important;
+    }
+    
+    .thermal-receipt tr {
+      page-break-inside: avoid !important;
+      page-break-after: avoid !important;
+    }
+    
+    .thermal-receipt th,
+    .thermal-receipt td {
+      padding: 0.5mm 0 !important;
+      text-align: left !important;
+      page-break-inside: avoid !important;
+    }
+    
+    .thermal-receipt .separator {
+      border-top: 1px dashed black !important;
+      margin: 2mm 0 !important;
+      height: 0 !important;
+      page-break-after: avoid !important;
+    }
+    
+    .thermal-receipt .total-row {
+      font-weight: bold !important;
+      font-size: 11pt !important;
+      border-top: 2px solid black !important;
+      padding-top: 2mm !important;
+      page-break-before: avoid !important;
+      page-break-inside: avoid !important;
+    }
+    
+    /* Thermal printer specific page settings */
+    @page :first {
+      size: 80mm auto;
+      margin: 0;
+    }
+    
+    /* When thermal receipt is being printed, force continuous paper */
+    body:has(.thermal-receipt) {
+      width: 80mm !important;
+    }
+    
+    /* Prevent breaks in specific sections */
+    .thermal-receipt div,
+    .thermal-receipt section {
+      page-break-inside: avoid !important;
     }
   }
 }

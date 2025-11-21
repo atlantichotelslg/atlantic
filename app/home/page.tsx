@@ -218,8 +218,8 @@ export default function HomePage() {
       serialNumber,
       customerName,
       roomNumber: bookedRooms.map(r => r.roomNumber).join(', '),
-      amountFigures: taxes ? taxes.totalWithTax : subtotal,  // ← CHANGED: Include tax if enabled
-      amountWords: ReceiptService.numberToWords(taxes ? taxes.totalWithTax : subtotal),  // ← CHANGED
+      amountFigures: taxes ? taxes.totalWithTax : subtotal,
+      amountWords: ReceiptService.numberToWords(taxes ? taxes.totalWithTax : subtotal),
       paymentMode,
       companyName: paymentMode === 'BTC' ? companyName : undefined,
       receptionistName: user?.name || '',
@@ -235,7 +235,6 @@ export default function HomePage() {
         dailyRate: room.dailyRate,
         subtotal: room.subtotal
       })),
-      // ← ADD TAX FIELDS
       includeTax,
       vatAmount: taxes?.vatAmount,
       consumptionTaxAmount: taxes?.consumptionTaxAmount,
@@ -260,6 +259,20 @@ export default function HomePage() {
         console.log('✅ Room', room.roomNumber, 'marked as occupied');
       });
     }
+
+    // ✅ CLEAR ALL FORM FIELDS IMMEDIATELY AFTER GENERATING RECEIPT
+    setCustomerName('');
+    setBookedRooms([]);
+    setCurrentRoomNumber('');
+    setCurrentDailyRate('');
+    setCurrentNumberOfDays(1);
+    setAmountFigures('');
+    setAmountWords('');
+    setPaymentMode('Cash');
+    setCompanyName('');
+    setIncludeTax(false);
+    setCheckInDate(new Date().toLocaleDateString('en-GB'));
+    setSerialNumber(ReceiptService.generateSerialNumber());
   };
 
   const handlePrint = () => {

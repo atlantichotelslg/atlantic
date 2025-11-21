@@ -3,8 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { ReceiptService, Receipt } from '@/lib/receipts';
 import { getLocationAddress } from '@/lib/locations';
-import { Room } from '@/lib/rooms';  // ← ADD THIS
-import RoomInvoiceGenerator from './RoomInvoiceGenerator';  // ← ADD THIS
+import { Room } from '@/lib/rooms';
+import RoomInvoiceGenerator from './RoomInvoiceGenerator';
 
 interface ReceiptHistoryProps {
   userLocation: string;
@@ -16,6 +16,7 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
   const [filteredReceipts, setFilteredReceipts] = useState<Receipt[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const receiptRef = useRef<HTMLDivElement>(null);
   const [viewMode, setViewMode] = useState<'receipts' | 'invoices'>('receipts');
@@ -40,6 +41,49 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
     setReceipts(allReceipts);
     setFilteredReceipts(allReceipts);
     setLoading(false);
+  };
+
+  const handleFetchFromCloud = async () => {
+    setSyncing(true);
+    try {
+      console.log('🌩️ Fetching all receipts from cloud...');
+      const cloudReceipts = await ReceiptService.fetchFromCloud();
+      
+      if (cloudReceipts.length > 0) {
+        console.log(`✅ Fetched ${cloudReceipts.length} receipts from cloud`);
+        
+        // Merge cloud receipts with local receipts
+        const localReceipts = ReceiptService.getAllReceipts();
+        const localReceiptIds = new Set(localReceipts.map(r => r.id));
+        
+        // Add new receipts from cloud that don't exist locally
+        const newReceipts = cloudReceipts.filter(r => !localReceiptIds.has(r.id));
+        
+        if (newReceipts.length > 0) {
+          console.log(`📥 Adding ${newReceipts.length} new receipts to local storage`);
+          
+          // Save merged receipts to localStorage
+          const mergedReceipts = [...localReceipts, ...newReceipts];
+          localStorage.setItem('atlantic_hotel_receipts', JSON.stringify(mergedReceipts));
+          
+          // Reload receipts
+          loadReceipts();
+          
+          alert(`✅ Successfully synced ${newReceipts.length} new receipt(s) from cloud!`);
+        } else {
+          console.log('ℹ️ No new receipts to sync');
+          alert('ℹ️ All receipts are up to date!');
+        }
+      } else {
+        console.log('ℹ️ No receipts found in cloud');
+        alert('ℹ️ No receipts found in cloud database');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching from cloud:', error);
+      alert('❌ Failed to fetch receipts from cloud. Please check your connection.');
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const filterReceipts = () => {
@@ -455,6 +499,28 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
             className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
           />
           <button
+            onClick={handleFetchFromCloud}
+            disabled={syncing}
+            className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition flex items-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
+          >
+            {syncing ? (
+              <>
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Syncing...
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                </svg>
+                Get all receipts and invoice
+              </>
+            )}
+          </button>
+          <button
             onClick={loadReceipts}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition flex items-center gap-2"
           >
@@ -544,7 +610,7 @@ export default function ReceiptHistory({ userLocation, userName }: ReceiptHistor
           /* Invoice View */
           <div className="space-y-4">
             {Object.entries(guestInvoices).map(([key, guestReceipts]) => {
-              if (!guestReceipts || guestReceipts.length === 0) return null;  // ← ADD THIS
+              if (!guestReceipts || guestReceipts.length === 0) return null;
               
               const firstReceipt = guestReceipts[0];
               const totalAmount = guestReceipts.reduce((sum, r) => sum + r.amountFigures, 0);

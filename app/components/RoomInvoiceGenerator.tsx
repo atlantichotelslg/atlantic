@@ -84,8 +84,14 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
     return roomReceipts.reduce((sum, receipt) => sum + (receipt.numberOfDays || 1), 0);
   };
 
-  const calculateRoomTotal = () => {
-    return roomReceipts.reduce((sum, receipt) => sum + receipt.amountFigures, 0);
+  const calculateRoomSubtotal = () => {
+    return roomReceipts.reduce((sum, receipt) => {
+      // Get the base amount without tax
+      if (receipt.includeTax && receipt.vatAmount && receipt.consumptionTaxAmount) {
+        return sum + (receipt.amountFigures - receipt.vatAmount - receipt.consumptionTaxAmount);
+      }
+      return sum + receipt.amountFigures;
+    }, 0);
   };
 
   const calculateRestaurantTotal = () => {
@@ -99,44 +105,39 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
     }, 0);
   };
 
-  const calculateGrandTotal = () => {
-    return calculateRoomTotal() + calculateRestaurantTotal() + calculateAdditionalTotal();
-  };
-
-  const calculateSubtotal = () => {
-    return calculateRoomTotal() + calculateRestaurantTotal() + calculateAdditionalTotal();
-  };
-
-  const calculateTaxAmounts = () => {
+  const calculateRoomTaxAmounts = () => {
     // Check if any receipt has tax included
     const hasTaxReceipts = roomReceipts.some(r => r.includeTax);
     
     if (!hasTaxReceipts) {
-      return { subtotal: calculateSubtotal(), vatAmount: 0, consumptionTaxAmount: 0, grandTotal: calculateGrandTotal() };
+      return { 
+        roomSubtotal: calculateRoomSubtotal(), 
+        vatAmount: 0, 
+        consumptionTaxAmount: 0, 
+        roomTotalWithTax: calculateRoomSubtotal() 
+      };
     }
 
-    // Calculate tax from receipts that have tax
-    const taxReceiptsTotal = roomReceipts
-      .filter(r => r.includeTax)
-      .reduce((sum, r) => {
-        // Back-calculate subtotal from total
-        const subtotal = r.totalWithTax ? r.totalWithTax / 1.125 : r.amountFigures;
-        return sum + subtotal;
-      }, 0);
-
-    const nonTaxTotal = roomReceipts
-      .filter(r => !r.includeTax)
-      .reduce((sum, r) => sum + r.amountFigures, 0);
-
-    const restaurantTotal = calculateRestaurantTotal();
-    const additionalTotal = calculateAdditionalTotal();
+    // Get room subtotal (without tax)
+    const roomSubtotal = calculateRoomSubtotal();
     
-    const subtotal = taxReceiptsTotal + nonTaxTotal + restaurantTotal + additionalTotal;
-    const vatAmount = taxReceiptsTotal * TAX_CONFIG.VAT_RATE;
-    const consumptionTaxAmount = taxReceiptsTotal * TAX_CONFIG.CONSUMPTION_TAX_RATE;
-    const grandTotal = subtotal + vatAmount + consumptionTaxAmount;
+    // Sum up all tax amounts from receipts
+    const vatAmount = roomReceipts
+      .filter(r => r.includeTax && r.vatAmount)
+      .reduce((sum, r) => sum + (r.vatAmount || 0), 0);
+    
+    const consumptionTaxAmount = roomReceipts
+      .filter(r => r.includeTax && r.consumptionTaxAmount)
+      .reduce((sum, r) => sum + (r.consumptionTaxAmount || 0), 0);
 
-    return { subtotal, vatAmount, consumptionTaxAmount, grandTotal };
+    const roomTotalWithTax = roomSubtotal + vatAmount + consumptionTaxAmount;
+
+    return { roomSubtotal, vatAmount, consumptionTaxAmount, roomTotalWithTax };
+  };
+
+  const calculateGrandTotal = () => {
+    const { roomTotalWithTax } = calculateRoomTaxAmounts();
+    return roomTotalWithTax + calculateRestaurantTotal() + calculateAdditionalTotal();
   };
 
   const addChargeRow = () => {
@@ -170,9 +171,25 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
     return loc ? loc.name : location;
   };
 
+  const calculateCheckOutDate = (checkInDate: string, numberOfDays: number): string => {
+    // Parse DD/MM/YYYY format
+    const [day, month, year] = checkInDate.split('/').map(Number);
+    const date = new Date(year, month - 1, day);
+    
+    // Add the number of days
+    date.setDate(date.getDate() + numberOfDays);
+    
+    // Return in DD/MM/YYYY format
+    const newDay = String(date.getDate()).padStart(2, '0');
+    const newMonth = String(date.getMonth() + 1).padStart(2, '0');
+    const newYear = date.getFullYear();
+    
+    return `${newDay}/${newMonth}/${newYear}`;
+  };
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl max-w-5xl w-full my-8 max-h-[95vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto print:overflow-visible">
+      <div className="bg-white rounded-xl max-w-5xl w-full my-8 max-h-[95vh] overflow-y-auto print:overflow-visible print:max-h-none">
         {/* Header - Hidden when printing */}
         <div className="p-4 bg-white sticky top-0 shadow no-print flex justify-between items-center border-b-2">
           <h3 className="text-xl font-bold text-gray-800">Invoice Preview</h3>
@@ -218,10 +235,52 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
               <p className="text-xs text-gray-600 mb-2">BILL TO:</p>
               <p className="text-xl font-bold">{room.guestName}</p>
               <p className="text-sm text-gray-600">
-                Room {room.number} • Check-in: {room.checkIn}
-                {roomReceipts.length > 0 && calculateTotalDays() > 0 && (
-                  <span className="ml-2">• Total Stay: {calculateTotalDays()} day{calculateTotalDays() > 1 ? 's' : ''}</span>
-                )}
+                {(() => {
+                  // Get all unique room numbers from receipts
+                  const allRoomNumbers = new Set<string>();
+                  roomReceipts.forEach(receipt => {
+                    if (receipt.roomDetails && receipt.roomDetails.length > 0) {
+                      receipt.roomDetails.forEach(detail => allRoomNumbers.add(detail.roomNumber));
+                    } else {
+                      // Fallback for old receipts
+                      receipt.roomNumber.split(',').map(r => r.trim()).forEach(r => allRoomNumbers.add(r));
+                    }
+                  });
+                  
+                  const roomsList = Array.from(allRoomNumbers).sort((a, b) => parseInt(a) - parseInt(b));
+                  const roomsText = roomsList.length > 1 ? `Rooms ${roomsList.join(' & ')}` : `Room ${roomsList[0] || room.number}`;
+                  
+                  // Calculate earliest check-in and latest check-out
+                  const earliestCheckIn = room.checkIn;
+                  
+                  // Find the latest check-out date from all room details
+                  let latestCheckOut = '';
+                  roomReceipts.forEach(receipt => {
+                    if (receipt.roomDetails && receipt.roomDetails.length > 0) {
+                      receipt.roomDetails.forEach(detail => {
+                        const checkOutDate = calculateCheckOutDate(earliestCheckIn, detail.numberOfDays);
+                        if (!latestCheckOut || new Date(checkOutDate.split('/').reverse().join('-')) > new Date(latestCheckOut.split('/').reverse().join('-'))) {
+                          latestCheckOut = checkOutDate;
+                        }
+                      });
+                    } else if (receipt.numberOfDays) {
+                      const checkOutDate = calculateCheckOutDate(earliestCheckIn, receipt.numberOfDays);
+                      if (!latestCheckOut || new Date(checkOutDate.split('/').reverse().join('-')) > new Date(latestCheckOut.split('/').reverse().join('-'))) {
+                        latestCheckOut = checkOutDate;
+                      }
+                    }
+                  });
+                  
+                  return (
+                    <>
+                      {roomsText} • Check-in: {earliestCheckIn}
+                      {latestCheckOut && <span> • Check-out: {latestCheckOut}</span>}
+                      {roomReceipts.length > 0 && calculateTotalDays() > 0 && (
+                        <span className="ml-2">• Total Stay: {calculateTotalDays()} day{calculateTotalDays() > 1 ? 's' : ''}</span>
+                      )}
+                    </>
+                  );
+                })()}
               </p>
             </div>
 
@@ -240,6 +299,13 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
                 {roomReceipts.map(r => {
                   const hasRoomDetails = r.roomDetails && r.roomDetails.length > 0;
                   const isMultiRoom = hasRoomDetails && r.roomDetails && r.roomDetails.length > 1;
+                  
+                  // Calculate the actual subtotal (amount before tax)
+                  let displayAmount = r.amountFigures;
+                  if (r.includeTax && r.vatAmount && r.consumptionTaxAmount) {
+                    // If tax was included, subtract it to show only the base amount
+                    displayAmount = r.amountFigures - r.vatAmount - r.consumptionTaxAmount;
+                  }
                   
                   // If we have detailed room breakdown, show each room separately
                   if (hasRoomDetails && isMultiRoom && r.roomDetails) {
@@ -263,7 +329,13 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
                                 {roomDetail.numberOfDays} day{roomDetail.numberOfDays > 1 ? 's' : ''} @ ₦{roomDetail.dailyRate.toLocaleString()}/day
                               </span>
                             </td>
-                            <td className="text-center py-2 px-3">-</td>
+                            <td className="text-center py-2 px-3 text-xs">
+                              {r.date}
+                              <br/>
+                              to
+                              <br/>
+                              {calculateCheckOutDate(r.date, roomDetail.numberOfDays)}
+                            </td>
                             <td className="text-right py-2 px-3">-</td>
                             <td className="text-right py-2 px-3 font-bold">₦{roomDetail.subtotal.toLocaleString()}</td>
                           </tr>
@@ -290,9 +362,21 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
                           }
                         </span>
                       </td>
-                      <td className="text-center py-2 px-3">{r.date}</td>
+                      <td className="text-center py-2 px-3 text-xs">
+                        {r.date}
+                        {r.numberOfDays && r.numberOfDays > 0 && (
+                          <>
+                            <br/>
+                            to
+                            <br/>
+                            {calculateCheckOutDate(r.date, r.numberOfDays)}
+                          </>
+                        )}
+                      </td>
                       <td className="text-right py-2 px-3">{r.serialNumber}</td>
-                      <td className="text-right py-2 px-3 font-bold">₦{r.amountFigures.toLocaleString()}</td>
+                      <td className="text-right py-2 px-3 font-bold">
+                        ₦{displayAmount.toLocaleString()}
+                      </td>
                     </tr>
                   );
                 })}
@@ -330,13 +414,40 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
             {/* Summary Breakdown */}
             <div className="flex justify-end mb-6">
               <div className="w-96 space-y-2">
-                {roomReceipts.length > 0 && (
-                  <div className="flex justify-between py-2 border-b">
-                    <span className="text-gray-700">Room Charges ({roomReceipts.length} receipt{roomReceipts.length > 1 ? 's' : ''})</span>
-                    <span className="font-bold">₦{calculateRoomTotal().toLocaleString()}</span>
-                  </div>
-                )}
+                {roomReceipts.length > 0 && (() => {
+                  const { roomSubtotal, vatAmount, consumptionTaxAmount, roomTotalWithTax } = calculateRoomTaxAmounts();
+                  const hasTax = roomReceipts.some(r => r.includeTax);
+                  
+                  return (
+                    <>
+                      {/* Room Charges Subtotal (before tax) */}
+                      <div className="flex justify-between py-2 border-b">
+                        <span className="text-gray-700">Room Charges ({roomReceipts.length} receipt{roomReceipts.length > 1 ? 's' : ''})</span>
+                        <span className="font-bold">₦{roomSubtotal.toLocaleString()}</span>
+                      </div>
+                      
+                      {/* Tax on Room Charges Only */}
+                      {hasTax && (
+                        <>
+                          <div className="flex justify-between py-1 text-sm pl-4">
+                            <span className="text-gray-600">VAT (7.5%) - {TAX_CONFIG.VAT_NUMBER}</span>
+                            <span className="font-semibold">₦{vatAmount.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between py-1 text-sm pl-4 border-b">
+                            <span className="text-gray-600">Lagos Consumption Tax (5%)</span>
+                            <span className="font-semibold">₦{consumptionTaxAmount.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between py-2 border-b bg-blue-50">
+                            <span className="text-gray-700 font-semibold">Room Total (with tax)</span>
+                            <span className="font-bold">₦{roomTotalWithTax.toLocaleString()}</span>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
                 
+                {/* Restaurant/Menu - NO TAX */}
                 {roomBills.length > 0 && (
                   <div className="flex justify-between py-2 border-b">
                     <span className="text-gray-700">Restaurant ({roomBills.length} bill{roomBills.length > 1 ? 's' : ''})</span>
@@ -344,46 +455,23 @@ export default function RoomInvoiceGenerator({ room, location, onClose }: RoomIn
                   </div>
                 )}
                 
+                {/* Additional Charges - NO TAX */}
                 {calculateAdditionalTotal() > 0 && (
                   <div className="flex justify-between py-2 border-b">
                     <span className="text-gray-700">Additional Charges</span>
                     <span className="font-bold">₦{calculateAdditionalTotal().toLocaleString()}</span>
                   </div>
                 )}
-
-                {/* Tax Breakdown - Only show if tax is included */}
-                {roomReceipts.some(r => r.includeTax) && (() => {
-                  const { subtotal, vatAmount, consumptionTaxAmount, grandTotal } = calculateTaxAmounts();
-                  return (
-                    <>
-                      <div className="flex justify-between py-2 border-b">
-                        <span className="text-gray-700">Subtotal</span>
-                        <span className="font-bold">₦{subtotal.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-sm">
-                        <span className="text-gray-600">VAT (7.5%) - {TAX_CONFIG.VAT_NUMBER}</span>
-                        <span className="font-semibold">₦{vatAmount.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between py-1 text-sm border-b">
-                        <span className="text-gray-600">Lagos Consumption Tax (5%)</span>
-                        <span className="font-semibold">₦{consumptionTaxAmount.toLocaleString()}</span>
-                      </div>
-                    </>
-                  );
-                })()}
               </div>
             </div>
 
-            {/* Total */}
+            {/* Grand Total */}
             <div className="flex justify-end mb-8">
               <div className="w-80 bg-blue-600 text-white p-4 rounded-xl">
                 <div className="flex justify-between items-center">
-                  <span className="text-lg font-bold">TOTAL</span>
+                  <span className="text-lg font-bold">GRAND TOTAL</span>
                   <span className="text-3xl font-bold">
-                    ₦{(roomReceipts.some(r => r.includeTax) 
-                      ? calculateTaxAmounts().grandTotal 
-                      : calculateGrandTotal()
-                    ).toLocaleString()}
+                    ₦{calculateGrandTotal().toLocaleString()}
                   </span>
                 </div>
               </div>

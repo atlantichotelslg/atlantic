@@ -342,6 +342,10 @@ export class ReceiptService {
         isExtension: item.is_extension || false,  // ← ADD THIS
         originalReceiptId: item.original_receipt_id || undefined,  // ← ADD THIS
         paymentForDates: item.payment_for_dates || undefined,  // ← ADD THIS
+        includeTax: item.include_tax || false,
+        vatAmount: item.vat_amount ? parseFloat(item.vat_amount) : undefined,
+        consumptionTaxAmount: item.consumption_tax_amount ? parseFloat(item.consumption_tax_amount) : undefined,
+        totalWithTax: item.total_with_tax ? parseFloat(item.total_with_tax) : undefined,
       }));
     } catch (error) {
       console.error('❌ Cloud fetch exception:', error);

@@ -193,4 +193,63 @@ export class MenuService {
     const timestamp = localStorage.getItem(this.LAST_SYNC_KEY);
     return timestamp ? new Date(parseInt(timestamp)) : null;
   }
+
+  // Fetch bills from cloud/database
+  static async fetchBillsFromCloud(roomNumber?: string, roomLocation?: string, guestName?: string): Promise<Bill[]> {
+    try {
+      console.log('📡 Fetching restaurant bills from database...');
+      
+      let query = supabase
+        .from('restaurant_bills')
+        .select('*')
+        .order('timestamp', { ascending: false });
+
+      // Apply filters if provided
+      if (roomNumber) {
+        query = query.eq('room_number', roomNumber);
+      }
+      if (roomLocation) {
+        query = query.eq('room_location', roomLocation);
+      }
+      if (guestName) {
+        query = query.eq('guest_name', guestName);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        // Convert database format to app format
+        const bills: Bill[] = data.map(item => ({
+          id: item.id,
+          billNumber: item.bill_number,
+          customerName: item.customer_name || undefined,
+          roomNumber: item.room_number || undefined,
+          roomLocation: item.room_location || undefined,
+          guestName: item.guest_name || undefined,
+          items: JSON.parse(item.items),
+          total: Number(item.total),
+          date: item.date,
+          timestamp: item.timestamp,
+          staffName: item.staff_name,
+          synced: true,
+          includeTax: item.include_tax || false,
+          subtotal: item.subtotal ? Number(item.subtotal) : undefined,
+          vatAmount: item.vat_amount ? Number(item.vat_amount) : undefined,
+          consumptionTaxAmount: item.consumption_tax_amount ? Number(item.consumption_tax_amount) : undefined,
+          totalWithTax: item.total_with_tax ? Number(item.total_with_tax) : undefined,
+        }));
+
+        console.log(`✅ Fetched ${bills.length} bills from database`);
+        return bills;
+      }
+
+      console.log('ℹ️ No bills found in database');
+      return [];
+    } catch (error) {
+      console.error('❌ Failed to fetch bills from database:', error);
+      return [];
+    }
+  }
 }

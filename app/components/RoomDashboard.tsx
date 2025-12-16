@@ -19,6 +19,7 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [isViewOnlyInvoice, setIsViewOnlyInvoice] = useState(false);
 
   useEffect(() => {
     // Initialize rooms
@@ -87,6 +88,8 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
     if (!selectedRoom) return;
     setShowUpdateModal(false);
     setShowInvoiceModal(true);
+    // Set a flag to not check out when closing invoice
+    setIsViewOnlyInvoice(true);
   };
 
   const handleCheckOut = async () => {
@@ -101,6 +104,7 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
 
     // Show invoice first
     setShowUpdateModal(false);
+    setIsViewOnlyInvoice(false); // ADD THIS LINE - This is a real checkout
     setShowInvoiceModal(true);
     
     // After invoice is closed, mark room as available
@@ -110,8 +114,18 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
   const handleInvoiceClose = async () => {
     setShowInvoiceModal(false);
     
-    // Mark room as available after invoice
-    if (selectedRoom) {
+    // Only mark room as available if this was a checkout, not just viewing invoice
+    if (selectedRoom && !isViewOnlyInvoice) {
+      // Mark receipts as checked out before updating room status
+      if (selectedRoom.guestName) {
+        const { ReceiptService } = await import('@/lib/receipts');
+        await ReceiptService.markReceiptsAsCheckedOut(
+          selectedRoom.number,
+          selectedRoom.guestName,
+          userLocation
+        );
+      }
+      
       await RoomService.updateRoomStatus(
         userLocation,
         selectedRoom.number,
@@ -120,7 +134,14 @@ export default function RoomDashboard({ userLocation, onCreateReceipt, onViewHis
       
       loadRooms();
       setSelectedRoom(null);
+    } else {
+      // Just close modal, don't check out
+      setSelectedRoom(null);
+      loadRooms();
     }
+    
+    // Reset flag
+    setIsViewOnlyInvoice(false);
   };
 
   const syncPendingRooms = async () => {

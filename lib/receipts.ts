@@ -24,35 +24,41 @@ export const calculateTaxes = (subtotal: number) => {
 export interface Receipt {
   id: string;
   serialNumber: string;
-  customerName: string;
+  customerName: string; // This will be the name on receipt
   roomNumber: string;
   amountFigures: number;
   amountWords: string;
   paymentMode: 'Cash' | 'Card' | 'Transfer' | 'BTC';
-  companyName?: string; 
+  companyName?: string;
+  companyDetails?: string;
   receptionistName: string;
   location: string;
-  receptionistSignature?: string;
   date: string;
   timestamp: number;
+  numberOfDays?: number;
   synced: boolean;
-  
-  // NEW FIELDS
-  numberOfDays?: number;         // How many days paid for
-  dailyRate?: number;            // Price per day
-  roomDetails?: Array<{  // ← ADD THIS
+  dailyRate?: number;
+  roomDetails?: Array<{
     roomNumber: string;
     numberOfDays: number;
     dailyRate: number;
     subtotal: number;
+    guestName?: string;
   }>;
-  isExtension?: boolean;         
-  originalReceiptId?: string;   
-  paymentForDates?: string;   
-  includeTax?: boolean;              // ← ADD THIS
-  vatAmount?: number;                // ← ADD THIS (7.5%)
-  consumptionTaxAmount?: number;     // ← ADD THIS (5%)
-  totalWithTax?: number;             // ← ADD THIS (subtotal + taxes)
+  guestNames?: Array<{
+    roomNumber: string;
+    guestName: string;
+  }>;
+  includeTax?: boolean;
+  vatAmount?: number;
+  consumptionTaxAmount?: number;
+  totalWithTax?: number;
+  isExtension?: boolean;
+  originalReceiptId?: string; // ADD THIS
+  paymentForDates?: string; // ADD THIS
+  includeServiceCharge?: boolean;
+  serviceChargeAmount?: number;
+  checkedOut?: boolean;
 }
 
 export class ReceiptService {
@@ -170,21 +176,25 @@ export class ReceiptService {
         amount_figures: receipt.amountFigures,
         amount_words: receipt.amountWords,
         payment_mode: receipt.paymentMode,
-        company_name: receipt.companyName || null,  // ← ADD THIS
+        company_name: receipt.companyName || null,
         receptionist_name: receipt.receptionistName,
         location: receipt.location,
         date: receipt.date,
         timestamp: receipt.timestamp,
-        number_of_days: receipt.numberOfDays || null,  // ← ADD THIS
-        daily_rate: receipt.dailyRate || null,  // ← ADD THIS
-        room_details: receipt.roomDetails || null,  // ← ADD THIS
-        is_extension: receipt.isExtension || false,  // ← ADD THIS
-        original_receipt_id: receipt.originalReceiptId || null,  // ← ADD THIS
-        payment_for_dates: receipt.paymentForDates || null,  // ← ADD THIS
-        include_tax: receipt.includeTax || false,  // ← ADD THIS
-        vat_amount: receipt.vatAmount || null,  // ← ADD THIS
-        consumption_tax_amount: receipt.consumptionTaxAmount || null,  // ← ADD THIS
-        total_with_tax: receipt.totalWithTax || null,  // ← ADD THIS
+        number_of_days: receipt.numberOfDays || null,
+        daily_rate: receipt.dailyRate || null,
+        room_details: receipt.roomDetails || null,
+        is_extension: receipt.isExtension || false,
+        original_receipt_id: receipt.originalReceiptId || null,
+        payment_for_dates: receipt.paymentForDates || null,
+        include_tax: receipt.includeTax || false,
+        vat_amount: receipt.vatAmount || null,
+        consumption_tax_amount: receipt.consumptionTaxAmount || null,
+        total_with_tax: receipt.totalWithTax || null,
+        guest_names: receipt.guestNames || null,  // ADD THIS LINE
+        include_service_charge: receipt.includeServiceCharge || false,  // ADD THIS LINE
+        service_charge_amount: receipt.serviceChargeAmount || null,  // ADD THIS LINE
+        checked_out: receipt.checkedOut || false,  // ADD THIS LINE
       };
       
       console.log('📤 Sending data:', dataToInsert);
@@ -330,26 +340,159 @@ export class ReceiptService {
         amountFigures: parseFloat(item.amount_figures),
         amountWords: item.amount_words,
         paymentMode: item.payment_mode,
-        companyName: item.company_name || undefined,  // ← ADD THIS
+        companyName: item.company_name || undefined,
         receptionistName: item.receptionist_name,
         location: item.location || 'Unknown',
         date: item.date,
         timestamp: item.timestamp,
         synced: true,
-        numberOfDays: item.number_of_days || undefined,  // ← ADD THIS
-        dailyRate: item.daily_rate || undefined,  // ← ADD THIS
-        roomDetails: item.room_details || undefined,  // ← ADD THIS
-        isExtension: item.is_extension || false,  // ← ADD THIS
-        originalReceiptId: item.original_receipt_id || undefined,  // ← ADD THIS
-        paymentForDates: item.payment_for_dates || undefined,  // ← ADD THIS
+        numberOfDays: item.number_of_days || undefined,
+        dailyRate: item.daily_rate || undefined,
+        roomDetails: item.room_details || undefined,
+        isExtension: item.is_extension || false,
+        originalReceiptId: item.original_receipt_id || undefined,
+        paymentForDates: item.payment_for_dates || undefined,
         includeTax: item.include_tax || false,
         vatAmount: item.vat_amount ? parseFloat(item.vat_amount) : undefined,
         consumptionTaxAmount: item.consumption_tax_amount ? parseFloat(item.consumption_tax_amount) : undefined,
         totalWithTax: item.total_with_tax ? parseFloat(item.total_with_tax) : undefined,
+        guestNames: item.guest_names || undefined,  // ADD THIS LINE
+        includeServiceCharge: item.include_service_charge || false,  // ADD THIS LINE
+        serviceChargeAmount: item.service_charge_amount ? parseFloat(item.service_charge_amount) : undefined,  // ADD THIS LINE
+        checkedOut: item.checked_out || false,  // ADD THIS LINE
       }));
     } catch (error) {
       console.error('❌ Cloud fetch exception:', error);
       return [];
+    }
+  }
+
+  // Mark receipts as checked out for a specific room and guest
+  static async markReceiptsAsCheckedOut(roomNumber: string, guestName: string, location: string): Promise<void> {
+    console.log(`🏷️ Marking receipts as checked out for Room ${roomNumber}, Guest: ${guestName}`);
+    
+    try {
+      // First, update in database
+      if (isOnline()) {
+        // Fetch all receipts for this location that aren't checked out
+        const { data: receipts, error: fetchError } = await supabase
+          .from('receipts')
+          .select('*')
+          .eq('location', location)
+          .eq('checked_out', false);
+        
+        if (fetchError) {
+          console.error('❌ Error fetching receipts:', fetchError);
+        } else if (receipts && receipts.length > 0) {
+          // Filter receipts that match the room number and guest name
+          const matchingReceipts = receipts.filter(receipt => {
+            // First check if room number matches (handle comma-separated room numbers)
+            const receiptRooms = receipt.room_number ? receipt.room_number.split(',').map((r: string) => r.trim()) : [];
+            const hasRoom = receiptRooms.includes(roomNumber);
+            
+            if (!hasRoom) {
+              return false;
+            }
+            
+            // Check if customer_name matches
+            if (receipt.customer_name && receipt.customer_name.toLowerCase().trim() === guestName.toLowerCase().trim()) {
+              return true;
+            }
+            
+            // Check if guest_names array contains this guest
+            if (receipt.guest_names) {
+              let guestNames;
+              try {
+                guestNames = Array.isArray(receipt.guest_names) ? receipt.guest_names : JSON.parse(receipt.guest_names);
+              } catch (e) {
+                guestNames = null;
+              }
+              
+              if (Array.isArray(guestNames)) {
+                return guestNames.some((gn: any) => 
+                  gn.roomNumber === roomNumber && 
+                  gn.guestName && 
+                  gn.guestName.toLowerCase().trim() === guestName.toLowerCase().trim()
+                );
+              }
+            }
+            
+            // Check if room_details contains this room and guest
+            if (receipt.room_details) {
+              let roomDetails;
+              try {
+                roomDetails = Array.isArray(receipt.room_details) ? receipt.room_details : JSON.parse(receipt.room_details);
+              } catch (e) {
+                roomDetails = null;
+              }
+              
+              if (Array.isArray(roomDetails)) {
+                return roomDetails.some((rd: any) => 
+                  rd.roomNumber === roomNumber && 
+                  rd.guestName && 
+                  rd.guestName.toLowerCase().trim() === guestName.toLowerCase().trim()
+                );
+              }
+            }
+            
+            return false;
+          });
+          
+          if (matchingReceipts.length > 0) {
+            const receiptIds = matchingReceipts.map(r => r.id);
+            const { error: updateError } = await supabase
+              .from('receipts')
+              .update({ checked_out: true })
+              .in('id', receiptIds);
+            
+            if (updateError) {
+              console.error('❌ Error updating receipts:', updateError);
+            } else {
+              console.log(`✅ Marked ${matchingReceipts.length} receipt(s) as checked out in database`);
+            }
+          }
+        }
+      }
+      
+      // Also update in localStorage
+      const allReceipts = this.getAllReceipts();
+      const updatedReceipts = allReceipts.map(receipt => {
+        // Check if this receipt matches the room and guest
+        const receiptRooms = receipt.roomNumber.split(',').map(r => r.trim());
+        const hasRoom = receiptRooms.includes(roomNumber);
+        
+        if (!hasRoom || receipt.location !== location) {
+          return receipt;
+        }
+        
+        // Check guest name match
+        let matchesGuest = false;
+        if (receipt.customerName && receipt.customerName.toLowerCase().trim() === guestName.toLowerCase().trim()) {
+          matchesGuest = true;
+        } else if (receipt.guestNames && receipt.guestNames.length > 0) {
+          matchesGuest = receipt.guestNames.some(gn => 
+            gn.roomNumber === roomNumber && 
+            gn.guestName.toLowerCase().trim() === guestName.toLowerCase().trim()
+          );
+        } else if (receipt.roomDetails && receipt.roomDetails.length > 0) {
+          matchesGuest = receipt.roomDetails.some(rd => 
+            rd.roomNumber === roomNumber && 
+            rd.guestName && 
+            rd.guestName.toLowerCase().trim() === guestName.toLowerCase().trim()
+          );
+        }
+        
+        if (matchesGuest && !receipt.checkedOut) {
+          return { ...receipt, checkedOut: true, synced: false };
+        }
+        
+        return receipt;
+      });
+      
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(updatedReceipts));
+      console.log('✅ Updated receipts in localStorage');
+    } catch (error) {
+      console.error('❌ Error marking receipts as checked out:', error);
     }
   }
 }

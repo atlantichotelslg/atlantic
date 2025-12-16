@@ -24,7 +24,12 @@ export default function HomePage() {
     dailyRate: number;
     numberOfDays: number;
     subtotal: number;
+    guestName: string;
   }>>([]);
+  const [currentGuestName, setCurrentGuestName] = useState('');
+  const [includeServiceCharge, setIncludeServiceCharge] = useState(false);
+  const [receiptGuestName, setReceiptGuestName] = useState(''); // Name to appear on receipt
+  const [showNameSelection, setShowNameSelection] = useState(false);
   const [currentRoomNumber, setCurrentRoomNumber] = useState('');
   const [currentDailyRate, setCurrentDailyRate] = useState('');
   const [currentNumberOfDays, setCurrentNumberOfDays] = useState(1);
@@ -150,6 +155,11 @@ export default function HomePage() {
       return;
     }
     
+    if (!currentGuestName.trim()) {
+      alert('Please enter guest name for this room');
+      return;
+    }
+    
     const rate = parseFloat(currentDailyRate.replace(/,/g, ''));
     if (!rate || rate <= 0) {
       alert('Please enter a valid daily rate');
@@ -168,7 +178,8 @@ export default function HomePage() {
       roomNumber: currentRoomNumber,
       dailyRate: rate,
       numberOfDays: currentNumberOfDays,
-      subtotal
+      subtotal,
+      guestName: currentGuestName.trim()
     };
     
     const updatedRooms = [...bookedRooms, newRoom];
@@ -180,10 +191,11 @@ export default function HomePage() {
     
     // Clear current room inputs
     setCurrentRoomNumber('');
+    setCurrentGuestName('');
     setCurrentDailyRate('');
     setCurrentNumberOfDays(1);
     
-    console.log(`✅ Added Room ${currentRoomNumber} to booking`);
+    console.log(`✅ Added Room ${currentRoomNumber} for ${currentGuestName}`);
   };
 
 
@@ -194,6 +206,27 @@ export default function HomePage() {
     // Update total amount
     const total = updatedRooms.reduce((sum, r) => sum + r.subtotal, 0);
     setAmountFigures(total.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+  };
+
+  // Function to clear all form fields
+  const clearFormFields = (keepBookedRooms: boolean = false) => {
+    if (!keepBookedRooms) {
+      setBookedRooms([]);
+    }
+    setCurrentRoomNumber('');
+    setCurrentGuestName('');
+    setCurrentDailyRate('');
+    setCurrentNumberOfDays(1);
+    setAmountFigures('');
+    setAmountWords('');
+    setPaymentMode('Cash');
+    setCompanyName('');
+    setIncludeTax(false);
+    setIncludeServiceCharge(false);
+    setReceiptGuestName('');
+    setCheckInDate(new Date().toLocaleDateString('en-GB'));
+    setSerialNumber(ReceiptService.generateSerialNumber());
+    setCustomerName('');
   };
 
   const handleLogout = () => {
@@ -210,16 +243,38 @@ export default function HomePage() {
       return;
     }
 
+    // Show name selection modal
+    setShowNameSelection(true);
+  };
+
+  const confirmReceiptGeneration = () => {
+    if (!receiptGuestName.trim()) {
+      alert('Please select whose name should appear on the receipt');
+      return;
+    }
+
     const subtotal = parseFloat(amountFigures.replace(/,/g, ''));
+    let finalAmount = subtotal;
+    let serviceChargeAmount = 0;
+    
+    if (includeServiceCharge) {
+      serviceChargeAmount = subtotal * 0.10;
+      finalAmount += serviceChargeAmount;
+    }
+    
     const taxes = includeTax ? calculateTaxes(subtotal) : null;
+    
+    if (taxes) {
+      finalAmount = subtotal + serviceChargeAmount + taxes.vatAmount + taxes.consumptionTaxAmount;
+    }
 
     const receipt: Receipt = {
       id: Date.now().toString(),
       serialNumber,
-      customerName,
+      customerName: receiptGuestName,
       roomNumber: bookedRooms.map(r => r.roomNumber).join(', '),
-      amountFigures: taxes ? taxes.totalWithTax : subtotal,
-      amountWords: ReceiptService.numberToWords(taxes ? taxes.totalWithTax : subtotal),
+      amountFigures: finalAmount,
+      amountWords: ReceiptService.numberToWords(finalAmount),
       paymentMode,
       companyName: paymentMode === 'BTC' ? companyName : undefined,
       receptionistName: user?.name || '',
@@ -233,46 +288,43 @@ export default function HomePage() {
         roomNumber: room.roomNumber,
         numberOfDays: room.numberOfDays,
         dailyRate: room.dailyRate,
-        subtotal: room.subtotal
+        subtotal: room.subtotal,
+        guestName: room.guestName
+      })),
+      guestNames: bookedRooms.map(room => ({
+        roomNumber: room.roomNumber,
+        guestName: room.guestName
       })),
       includeTax,
       vatAmount: taxes?.vatAmount,
       consumptionTaxAmount: taxes?.consumptionTaxAmount,
-      totalWithTax: taxes?.totalWithTax,
+      totalWithTax: taxes ? (subtotal + taxes.vatAmount + taxes.consumptionTaxAmount) : undefined,
+      includeServiceCharge,
+      serviceChargeAmount,
     };
 
     ReceiptService.saveReceipt(receipt);
     setCurrentReceipt(receipt);
     setShowReceipt(true);
+    setShowNameSelection(false);
     
-    // Mark ALL rooms as occupied after creating receipt
+    // Mark ALL rooms as occupied with their respective guest names
     if (bookedRooms.length > 0 && userLocation) {
       bookedRooms.forEach(room => {
         RoomService.updateRoomStatus(
           userLocation,
           room.roomNumber,
           'occupied',
-          customerName,
+          room.guestName,
           new Date().toLocaleDateString('en-GB'),
           ''
         );
-        console.log('✅ Room', room.roomNumber, 'marked as occupied');
+        console.log('✅ Room', room.roomNumber, 'marked as occupied for', room.guestName);
       });
     }
 
-    // ✅ CLEAR ALL FORM FIELDS IMMEDIATELY AFTER GENERATING RECEIPT
-    setCustomerName('');
-    setBookedRooms([]);
-    setCurrentRoomNumber('');
-    setCurrentDailyRate('');
-    setCurrentNumberOfDays(1);
-    setAmountFigures('');
-    setAmountWords('');
-    setPaymentMode('Cash');
-    setCompanyName('');
-    setIncludeTax(false);
-    setCheckInDate(new Date().toLocaleDateString('en-GB'));
-    setSerialNumber(ReceiptService.generateSerialNumber());
+    // Clear all form fields but keep bookedRooms for receipt display
+    clearFormFields(true);
   };
 
   const handlePrint = () => {
@@ -281,18 +333,9 @@ export default function HomePage() {
 
   const handleNewReceipt = () => {
     setShowReceipt(false);
-    setCustomerName('');
-    setBookedRooms([]);
-    setCurrentRoomNumber('');
-    setCurrentDailyRate('');
-    setCurrentNumberOfDays(1);
-    setAmountFigures('');
-    setAmountWords('');
-    setPaymentMode('Cash');
-    setCompanyName('');
-    setCheckInDate(new Date().toLocaleDateString('en-GB'));
-    setSerialNumber(ReceiptService.generateSerialNumber());
     setCurrentReceipt(null);
+    // Clear all fields including bookedRooms
+    clearFormFields(false);
   };
 
   if (!user) return null;
@@ -379,10 +422,15 @@ export default function HomePage() {
               <RoomDashboard 
                 userLocation={userLocation} 
                 onCreateReceipt={(roomNumber: string) => {
+                  // Clear all form fields and generate new serial number
+                  clearFormFields(false);
+                  
+                  // If room number is provided, set it after clearing
                   if (roomNumber) {
                     setCurrentRoomNumber(roomNumber);
                     console.log('🏨 Pre-filled room:', roomNumber);
                   }
+                  
                   setReceptionistView('create');
                 }}
                 onViewHistory={() => setReceptionistView('history')}
@@ -406,26 +454,11 @@ export default function HomePage() {
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Customer Name *
-                        </label>
-                        <input
-                          type="text"
-                          value={customerName}
-                          onChange={(e) => setCustomerName(e.target.value)}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                          placeholder="e.g., John Doe"
-                          autoComplete="off"
-                          required
-                        />
-                      </div>
-
                       {/* Multi-Room Booking Section */}
                       <div className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50">
                         <h3 className="text-lg font-bold text-blue-900 mb-4">Add Rooms to Booking</h3>
                         
-                        <div className="grid grid-cols-3 gap-4 mb-3">
+                        <div className="grid grid-cols-4 gap-4 mb-3">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               Room Number *
@@ -450,6 +483,22 @@ export default function HomePage() {
 
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Guest Name *
+                            </label>
+                            <input
+                              type="text"
+                              value={currentGuestName}
+                              onChange={(e) => setCurrentGuestName(e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                              placeholder="e.g., John Doe"
+                              autoComplete="new-password"
+                              name={`guest-name-${Date.now()}`}
+
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
                               Daily Rate (₦) *
                             </label>
                             <input
@@ -463,6 +512,8 @@ export default function HomePage() {
                               }}
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                               placeholder="e.g., 10,000"
+                              autoComplete="new-password"
+                              name={`daily-rate-${Date.now()}`}
                             />
                           </div>
 
@@ -496,7 +547,7 @@ export default function HomePage() {
                             {bookedRooms.map((room) => (
                               <div key={room.roomNumber} className="flex justify-between items-center bg-white p-3 rounded-lg border border-blue-300">
                                 <div>
-                                  <p className="font-semibold text-gray-800">Room {room.roomNumber}</p>
+                                  <p className="font-semibold text-gray-800">Room {room.roomNumber} - {room.guestName}</p>
                                   <p className="text-xs text-gray-600">
                                     {room.numberOfDays} day{room.numberOfDays > 1 ? 's' : ''} @ ₦{room.dailyRate.toLocaleString()}/day
                                   </p>
@@ -547,7 +598,8 @@ export default function HomePage() {
                           onChange={handleAmountChange}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                           placeholder="e.g., 50,000"
-                          autoComplete="off"
+                          autoComplete="new-password"
+                          name={`amount-${Date.now()}`}
                           required
                         />
                       </div>
@@ -586,6 +638,64 @@ export default function HomePage() {
                           <option value="Transfer">Transfer</option>
                           <option value="BTC">BTC (Bill to Company)</option>
                         </select>
+                      </div>
+
+
+                      {/* Service Charge Toggle */}
+                      <div className="border-2 border-purple-200 rounded-lg p-4 bg-purple-50">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="text-sm font-semibold text-gray-700">
+                              Include Service Charge (10%)
+                            </label>
+                            <p className="text-xs text-gray-600 mt-1">
+                              10% service charge will be added to the total
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIncludeServiceCharge(!includeServiceCharge)}
+                            className={`relative inline-flex h-12 w-24 items-center rounded-full transition-colors ${
+                              includeServiceCharge ? 'bg-purple-600' : 'bg-gray-300'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-10 w-10 transform rounded-full bg-white transition-transform ${
+                                includeServiceCharge ? 'translate-x-12' : 'translate-x-1'
+                              }`}
+                            />
+                            <span className={`absolute text-xs font-bold ${
+                              includeServiceCharge ? 'left-2 text-white' : 'right-2 text-gray-600'
+                            }`}>
+                              {includeServiceCharge ? 'YES' : 'NO'}
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Service Charge Preview */}
+                        {includeServiceCharge && bookedRooms.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-purple-300">
+                            <p className="text-xs font-semibold text-gray-700 mb-2">Service Charge Breakdown:</p>
+                            <div className="space-y-1 text-xs text-gray-600">
+                              <div className="flex justify-between">
+                                <span>Subtotal:</span>
+                                <span className="font-semibold">₦{amountFigures || '0'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Service Charge (10%):</span>
+                                <span className="font-semibold">
+                                  ₦{(parseFloat(amountFigures.replace(/,/g, '')) * 0.10).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between pt-2 border-t border-purple-300">
+                                <span className="font-bold text-purple-900">Total with Service Charge:</span>
+                                <span className="font-bold text-purple-900">
+                                  ₦{(parseFloat(amountFigures.replace(/,/g, '')) * 1.10).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Include Tax Toggle */}
@@ -648,6 +758,49 @@ export default function HomePage() {
                         )}
                       </div>
 
+                      {/* GENERAL TOTAL - Shows when both Service Charge AND Tax are enabled */}
+                      {includeServiceCharge && includeTax && bookedRooms.length > 0 && (
+                        <div className="border-2 border-blue-600 rounded-lg p-4 bg-blue-50">
+                          <p className="text-sm font-bold text-blue-900 mb-3">GENERAL TOTAL BREAKDOWN</p>
+                          <div className="space-y-2 text-sm text-gray-700">
+                            <div className="flex justify-between">
+                              <span>Subtotal:</span>
+                              <span className="font-semibold">₦{amountFigures || '0'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Service Charge (10%):</span>
+                              <span className="font-semibold">
+                                ₦{(parseFloat(amountFigures.replace(/,/g, '')) * 0.10).toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>VAT (7.5%):</span>
+                              <span className="font-semibold">
+                                ₦{calculateTaxes(parseFloat(amountFigures.replace(/,/g, '')) || 0).vatAmount.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Consumption Tax (5%):</span>
+                              <span className="font-semibold">
+                                ₦{calculateTaxes(parseFloat(amountFigures.replace(/,/g, '')) || 0).consumptionTaxAmount.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex justify-between pt-3 mt-3 border-t-2 border-blue-600">
+                              <span className="font-bold text-blue-900 text-lg">GENERAL TOTAL:</span>
+                              <span className="font-bold text-blue-900 text-xl">
+                                ₦{(() => {
+                                  const subtotal = parseFloat(amountFigures.replace(/,/g, '')) || 0;
+                                  const serviceCharge = subtotal * 0.10;
+                                  const taxes = calculateTaxes(subtotal);
+                                  const generalTotal = subtotal + serviceCharge + taxes.vatAmount + taxes.consumptionTaxAmount;
+                                  return generalTotal.toLocaleString();
+                                })()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Company Name - Show only when BTC is selected */}
                       {paymentMode === 'BTC' && (
                         <div>
@@ -660,9 +813,60 @@ export default function HomePage() {
                             onChange={(e) => setCompanyName(e.target.value)}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                             placeholder="e.g., Shell Nigeria Ltd"
-                            autoComplete="off"
+                            autoComplete="new-password"
+                            name={`company-${Date.now()}`}
                             required
                           />
+                        </div>
+                      )}
+
+                      {/* Name Selection Modal */}
+                      {showNameSelection && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                          <div className="bg-white rounded-xl p-8 max-w-md w-full">
+                            <h3 className="text-xl font-bold mb-4">Select Name for Receipt</h3>
+                            <p className="text-sm text-gray-600 mb-4">
+                              Choose whose name should appear on the printed receipt:
+                            </p>
+                            
+                            <div className="space-y-2 mb-6">
+                              {bookedRooms.map((room) => (
+                                <button
+                                  key={room.roomNumber}
+                                  type="button"
+                                  onClick={() => setReceiptGuestName(room.guestName)}
+                                  className={`w-full p-3 rounded-lg border-2 text-left transition ${
+                                    receiptGuestName === room.guestName
+                                      ? 'border-blue-600 bg-blue-50'
+                                      : 'border-gray-300 hover:border-blue-300'
+                                  }`}
+                                >
+                                  <p className="font-semibold">{room.guestName}</p>
+                                  <p className="text-xs text-gray-600">Room {room.roomNumber}</p>
+                                </button>
+                              ))}
+                            </div>
+
+                            <div className="flex gap-3">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowNameSelection(false);
+                                  setReceiptGuestName('');
+                                }}
+                                className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={confirmReceiptGeneration}
+                                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                              >
+                                Generate Receipt
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       )}
 

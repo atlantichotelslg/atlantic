@@ -23,7 +23,8 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000');
-    mainWindow.webContents.openDevTools();
+    // DevTools can be opened manually with Ctrl+Shift+I (Windows/Linux) or Cmd+Option+I (Mac)
+    // mainWindow.webContents.openDevTools();
   } else {
     // Create local server to serve static files
     const expressApp = express();
@@ -34,8 +35,8 @@ function createWindow() {
       mainWindow.loadURL(`http://localhost:${PORT}`);
     });
 
-    // Open DevTools temporarily
-    mainWindow.webContents.openDevTools();
+    // DevTools can be opened manually with Ctrl+Shift+I (Windows/Linux) or Cmd+Option+I (Mac)
+    // mainWindow.webContents.openDevTools();
   }
 }
 

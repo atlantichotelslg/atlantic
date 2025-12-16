@@ -112,7 +112,7 @@ export default function RestaurantDashboard({ userName }: RestaurantDashboardPro
       ));
     } else {
       const newItem: BillItem = {
-        id: Date.now().toString(),
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         menuItemId: menuItem.id,
         name: menuItem.name,
         quantity: 1,
@@ -147,16 +147,22 @@ export default function RestaurantDashboard({ userName }: RestaurantDashboardPro
       return;
     }
 
+    // Validation: If room is selected, make sure we have guest name
+    if (roomNumber && !selectedRoomData?.guestName) {
+      alert('Error: Room selected but no guest name found. Please reselect the room.');
+      return;
+    }
+
     const subtotal = calculateTotal();
     const taxes = includeTax ? calculateTaxes(subtotal) : null;
 
     const bill: Bill = {
-      id: Date.now().toString(),
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       billNumber: MenuService.generateBillNumber(),
       customerName: customerName || undefined,
       roomNumber: roomNumber || undefined,
       roomLocation: roomLocation || undefined,
-      guestName: selectedRoomData?.guestName,
+      guestName: selectedRoomData?.guestName || undefined,
       items: cart,
       total: taxes ? taxes.totalWithTax : subtotal,
       date: new Date().toLocaleDateString('en-GB'),
@@ -169,6 +175,14 @@ export default function RestaurantDashboard({ userName }: RestaurantDashboardPro
       consumptionTaxAmount: taxes?.consumptionTaxAmount,
       totalWithTax: taxes?.totalWithTax,
     };
+
+    // Log the bill data to verify before saving
+    console.log('📝 Generating bill with data:', {
+      roomNumber: bill.roomNumber,
+      roomLocation: bill.roomLocation,
+      guestName: bill.guestName,
+      customerName: bill.customerName
+    });
 
     MenuService.saveBill(bill);
     setCurrentBill(bill);
